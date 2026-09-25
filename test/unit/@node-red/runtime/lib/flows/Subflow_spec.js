@@ -812,6 +812,58 @@ describe('Subflow', function() {
             await flow.stop()
         });
 
+        it("logs an error and still starts when a subflow instance env var has malformed JSON", async function() {
+            var logMessages = [];
+            Flow.init({
+                settings:{},
+                log:{
+                    log: function(msg) { logMessages.push(msg) },
+                    debug: function() {},
+                    trace: function() {},
+                    warn: function() {},
+                    info: function() {},
+                    metric: function() {},
+                    _: function() { return "abc" }
+                }
+            });
+            var config = flowUtils.parseConfig([
+                {id:"t1",type:"tab"},
+                {id:"1",x:10,y:10,z:"t1",type:"test",foo:"t1.1",wires:["2"]},
+                {id:"2",x:10,y:10,z:"t1",type:"subflow:sf1",wires:["3"],env:[{name:"__KEY__",value:'{"a":1,}',type:"json"}]},
+                {id:"3",x:10,y:10,z:"t1",type:"test",foo:"t1.3",wires:[]},
+                {id:"sf1",type:"subflow",name:"Subflow 2",info:"",env: [{name: '__KEY__', value: '{}', type: 'json'}],
+                    "in":[ {wires:[{id:"sf1-1"}]} ],
+                    "out":[ {wires:[{id:"sf1-2",port:0}]} ]},
+                {id:"sf1-1",type:"test",z:"sf1",foo:"sf1.1",x:166,y:99,wires:[["sf1-2"]]},
+                {id:"sf1-2",type:"testEnv",z:"sf1",foo:"sf1.2",x:166,y:99,wires:[[]]}
+            ]);
+            var flow = Flow.create({
+                getSetting: k=> process.env[k],
+                handleError: (a,b,c) => { console.log(a,b,c); }
+            },config,config.flows["t1"]);
+
+            await flow.start();
+
+            // The flow has started despite the malformed JSON
+            currentNodes.should.have.a.property("1");
+            currentNodes.should.have.a.property("3");
+
+            // The error is logged against the subflow instance node, naming the env var
+            var errorLogs = logMessages.filter(function(m) { return typeof m.msg === "string" && m.msg.indexOf("Error evaluating env property") === 0 });
+            errorLogs.should.have.length(1);
+            errorLogs[0].should.have.a.property("id","2");
+            errorLogs[0].should.have.a.property("type","subflow");
+            errorLogs[0].msg.should.containEql("'__KEY__'");
+
+            // The env var evaluates to undefined inside the subflow
+            currentNodes["1"].receive({payload: "test"});
+            await NR_TEST_UTILS.sleep(150)
+            currentNodes["3"].should.have.a.property("receivedEnv");
+            (currentNodes["3"].receivedEnv.__KEY__ === undefined).should.be.true();
+
+            await flow.stop()
+        });
+
         it("can access nested subflow env var", async function() {
             var config = flowUtils.parseConfig([
                 {id:"t1",type:"tab", env: [{name: '__KEY1__', value: 't1', type: 'str'}]},

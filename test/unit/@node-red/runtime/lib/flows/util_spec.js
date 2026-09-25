@@ -798,4 +798,56 @@ describe('flows/util', function() {
         });
 
     });
+
+    describe('#evaluateEnvProperties',function() {
+        function createTestFlow(loggedErrors) {
+            return {
+                getSetting: function(name) { return undefined },
+                error: function(msg) { loggedErrors.push(msg) }
+            }
+        }
+        it('evaluates typed env var values', async function() {
+            const loggedErrors = [];
+            const flow = createTestFlow(loggedErrors);
+            const result = await flowUtil.evaluateEnvProperties(flow, [
+                { name: 'STR', value: 'hello', type: 'str' },
+                { name: 'NUM', value: '123', type: 'num' },
+                { name: 'BOOL', value: 'true', type: 'bool' },
+                { name: 'JSON', value: '{"a":1}', type: 'json' }
+            ], {});
+            result.should.have.property('STR','hello');
+            result.should.have.property('NUM',123);
+            result.should.have.property('BOOL',true);
+            result.JSON.should.have.property('__clone__',true);
+            result.JSON.value.should.eql({a:1});
+            loggedErrors.should.have.length(0);
+        });
+        it('logs an error and carries on when a JSON env var value is malformed', async function() {
+            const loggedErrors = [];
+            const flow = createTestFlow(loggedErrors);
+            const result = await flowUtil.evaluateEnvProperties(flow, [
+                { name: 'VALID', value: '{"a":1}', type: 'json' },
+                { name: 'INVALID', value: '{"a":1,}', type: 'json' },
+                { name: 'AFTER', value: 'still here', type: 'str' }
+            ], {});
+            result.should.have.property('INVALID',undefined);
+            result.should.have.property('AFTER','still here');
+            result.VALID.should.have.property('__clone__',true);
+            result.VALID.value.should.eql({a:1});
+            loggedErrors.should.have.length(1);
+            loggedErrors[0].should.startWith("Error evaluating env property 'INVALID':");
+        });
+        it('logs an error and carries on when a JSONata env var cannot be evaluated', async function() {
+            const loggedErrors = [];
+            const flow = createTestFlow(loggedErrors);
+            const result = await flowUtil.evaluateEnvProperties(flow, [
+                { name: 'INVALID', value: '$noSuchFunction(1)', type: 'jsonata' },
+                { name: 'AFTER', value: 'still here', type: 'str' }
+            ], {});
+            result.should.have.property('INVALID',undefined);
+            result.should.have.property('AFTER','still here');
+            loggedErrors.should.have.length(1);
+            loggedErrors[0].should.startWith("Error evaluating env property 'INVALID':");
+        });
+    });
 });
