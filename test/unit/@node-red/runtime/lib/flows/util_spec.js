@@ -98,6 +98,52 @@ describe('flows/util', function() {
 
     });
 
+    describe('#evaluateEnvProperties',function() {
+        function fakeFlow() {
+            return {
+                getSetting: function(name) { return process.env[name]; },
+                error: sinon.stub()
+            }
+        }
+        it('evaluates typed env var values', async function() {
+            var flow = fakeFlow();
+            var result = await flowUtil.evaluateEnvProperties(flow, [
+                {name:"STR", value:"a-string", type:"str"},
+                {name:"NUM", value:"123", type:"num"},
+                {name:"BOOL", value:"true", type:"bool"},
+                {name:"JSON", value:'{"a":1}', type:"json"}
+            ]);
+            result.STR.should.equal("a-string");
+            result.NUM.should.equal(123);
+            result.BOOL.should.equal(true);
+            result.JSON.should.have.a.property("value").eql({a:1});
+            result.JSON.should.have.a.property("__clone__",true);
+            flow.error.called.should.be.false();
+        });
+        it('logs an error and carries on when a JSON value is invalid', async function() {
+            var flow = fakeFlow();
+            var result = await flowUtil.evaluateEnvProperties(flow, [
+                {name:"MYJSON", value:'{"a":1,}', type:"json"},
+                {name:"OTHER", value:"still-evaluated", type:"str"}
+            ]);
+            (result.MYJSON === undefined).should.be.true();
+            result.OTHER.should.equal("still-evaluated");
+            flow.error.calledOnce.should.be.true();
+            flow.error.firstCall.args[0].should.containEql("MYJSON");
+        });
+        it('logs an error and carries on when a JSONata value fails to evaluate', async function() {
+            var flow = fakeFlow();
+            var result = await flowUtil.evaluateEnvProperties(flow, [
+                {name:"MYEXPR", value:"$nosuchfn(1)", type:"jsonata"},
+                {name:"OTHER", value:"still-evaluated", type:"str"}
+            ]);
+            (result.MYEXPR === undefined).should.be.true();
+            result.OTHER.should.equal("still-evaluated");
+            flow.error.calledOnce.should.be.true();
+            flow.error.firstCall.args[0].should.containEql("MYEXPR");
+        });
+    });
+
     describe('#diffNodes',function() {
         it('handles a null old node', function() {
             flowUtil.diffNodes(null,{}).should.be.true();
